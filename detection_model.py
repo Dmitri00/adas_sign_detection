@@ -1,14 +1,13 @@
 import torchvision
-from torchvision.models.detection import FasterRCNN
+from torchvision.models.detection import *
 from torchvision.models.detection.rpn import AnchorGenerator
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 
 
-
-def make_mobilenet_model(num_classes):
+def faster_rcnn_mobilenet(num_classes, pretrained=True):
     # load a pre-trained model for classification and return
     # only the features
-    backbone = torchvision.models.mobilenet_v2(pretrained=True).features
+    backbone = torchvision.models.mobilenet_v2(pretrained=pretrained).features
     # FasterRCNN needs to know the number of
     # output channels in a backbone. For mobilenet_v2, it's 1280
     # so we need to add it here
@@ -39,14 +38,3 @@ def make_mobilenet_model(num_classes):
                     rpn_anchor_generator=anchor_generator,
                     box_roi_pool=roi_pooler)
     return model
-
-def make_resnet_model(num_classes):
-    # load a model pre-trained pre-trained on COCO
-    model = torchvision.models.detection.fasterrcnn_resnet50_fpn(pretrained=True)
-
-    # replace the classifier with a new one, that has
-    # num_classes which is user-defined
-    # get number of input features for the classifier
-    in_features = model.roi_heads.box_predictor.cls_score.in_features
-    # replace the pre-trained head with a new one
-    model.roi_heads.box_predictor = FastRCNNPredictor(in_features, num_classes)

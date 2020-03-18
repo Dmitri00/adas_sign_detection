@@ -17,13 +17,16 @@ data_transforms = {
 
 
 class GermanTrafficDataset(object):
-    def __init__(self, root, transforms):
-        self.root = root
+    def __init__(self, root, transforms, image_set):
+        if image_set == 'train':
+            self.root = os.path.join(root, 'TrainIJCNN2013')
+        elif image_set == 'val' or image_set == 'test':
+            self.root = os.path.join(root, 'TestIJCNN2013') 
         self.transforms = transforms
         # load all image files, sorting them to
         # ensure that they are aligned
-        self.gt_name = os.path.join(root, "gt.txt")
-        files_in_dir = os.listdir(root)
+        self.gt_name = os.path.join(self.root, "gt.txt")
+        files_in_dir = os.listdir(self.root)
         self.imgs = list(sorted(filter(lambda x: 'ppm' in x, files_in_dir)))
         with open(self.gt_name, 'r') as gt_file:
             gt_lines = gt_file.readlines()
@@ -44,15 +47,19 @@ class GermanTrafficDataset(object):
             else:
                 gt_dict[img_name] = [(box, box_class)]
         self.num_classes = len(class_counter.keys())
+        
+        self.imgs = list(gt_dict.keys())
+        #import pdb; pdb.set_trace()
         return gt_dict
 
     def __getitem__(self, idx):
         # load images ad masks
         img_path = os.path.join(self.root, self.imgs[idx])
+        img_name = self.imgs[idx]
         box = 0
         label = 1
-        boxes = [self.ground_truth[idx][sign][box] for sign in self.ground_truth[idx]]
-        labels = [self.ground_truth[idx][sign][label] for sign in self.ground_truth[idx]]
+        boxes = [sign[box] for sign in self.ground_truth[img_name]]
+        labels = [sign[label] for sign in self.ground_truth[img_name]]
         img = Image.open(img_path).convert("RGB")
         
 
