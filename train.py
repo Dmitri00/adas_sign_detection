@@ -43,7 +43,8 @@ def get_dataset(name, image_set, transform, data_path):
     paths = {
         "coco": (data_path, get_coco, 91),
         "coco_kp": (data_path, get_coco_kp, 2),
-        'german_traffic': (data_path, GermanTrafficDataset, 6)
+        'german_traffic': (data_path, GermanTrafficDataset, 43),
+        'german_traffic_4cl': (data_path, GermanTrafficDataset4, 4)
     }
     p, ds_fn, num_classes = paths[name]
 
@@ -59,7 +60,12 @@ def get_transform(train):
     return T.Compose(transforms)
 
 
+import ssl
 def main(args):
+
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
     utils.init_distributed_mode(args)
     print(args)
 
