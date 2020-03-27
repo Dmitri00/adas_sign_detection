@@ -25,7 +25,7 @@ import torch
 import torch.utils.data
 from torch import nn
 import torchvision
-from dataset import GermanTrafficDataset
+from dataset import GermanTrafficDataset, GermanTrafficDataset4, PennFudanDataset
 import detection_model as model_zoo
 import torchvision.models.detection
 import torchvision.models.detection.mask_rcnn
@@ -44,7 +44,8 @@ def get_dataset(name, image_set, transform, data_path):
         "coco": (data_path, get_coco, 91),
         "coco_kp": (data_path, get_coco_kp, 2),
         'german_traffic': (data_path, GermanTrafficDataset, 43),
-        'german_traffic_4cl': (data_path, GermanTrafficDataset4, 4)
+        'german_traffic_4cl': (data_path, GermanTrafficDataset4, 4),
+        'penn_fudan': (data_path, PennFudanDataset, 2)
     }
     p, ds_fn, num_classes = paths[name]
 
@@ -146,6 +147,8 @@ def main(args):
                 os.path.join(args.output_dir, 'model_{}.pth'.format(epoch)))
 
         # evaluate after every epoch
+        evaluate(model, data_loader_test, device=device)
+    if args.epochs - args.start_epoch == 0:
         evaluate(model, data_loader_test, device=device)
 
     total_time = time.time() - start_time

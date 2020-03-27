@@ -1,10 +1,15 @@
 import torchvision
+import torch
 from torchvision.models.detection import *
+from ssd import ssd_custom
 from torchvision.models.detection.rpn import AnchorGenerator
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 from torchvision.models.detection.mask_rcnn import MaskRCNNPredictor
 
-
+def ssd_toch_hub(num_classes, pretrained):
+    precision = 'fp32'
+    ssd_model = torch.hub.load('NVIDIA/DeepLearningExamples:torchhub', 'nvidia_ssd', model_math=precision)
+    return ssd_model
 def instance_segmentation(num_classes, pretrained):
     # load an instance segmentation model pre-trained pre-trained on COCO
     model = torchvision.models.detection.maskrcnn_resnet50_fpn(pretrained=True)

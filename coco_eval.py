@@ -36,6 +36,7 @@ class CocoEvaluator(object):
 
         for iou_type in self.iou_types:
             results = self.prepare(predictions, iou_type)
+            #()
             coco_dt = loadRes(self.coco_gt, results) if results else COCO()
             coco_eval = self.coco_eval[iou_type]
 
@@ -324,6 +325,7 @@ def evaluate(self):
         computeIoU = self.computeIoU
     elif p.iouType == 'keypoints':
         computeIoU = self.computeOks
+    #()
     self.ious = {
         (imgId, catId): computeIoU(imgId, catId)
         for imgId in p.imgIds
