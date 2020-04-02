@@ -26,7 +26,7 @@ import torch.utils.data
 from torch import nn
 import torchvision
 from dataset import GermanTrafficDataset, GermanTrafficDataset4, PennFudanDataset
-import detection_model as model_zoo
+import models.detection_model as model_zoo_local
 import torchvision.models.detection
 import torchvision.models.detection.mask_rcnn
 
@@ -103,7 +103,7 @@ def main(args):
         collate_fn=utils.collate_fn)
 
     print("Creating model")
-    model = model_zoo.__dict__[args.model](num_classes=num_classes,
+    model = model_zoo_local.__dict__[args.model](num_classes=num_classes,
                                                               pretrained=args.pretrained)
     model.to(device)
 
