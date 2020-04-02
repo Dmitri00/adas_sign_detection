@@ -119,7 +119,7 @@ class SSD(GeneralizedSSD300):
 
     def __init__(self, backbone, num_classes=None,
                  # transform parameters
-                 min_size=800, max_size=1333,
+                 min_size=350, max_size=450,
                  image_mean=None, image_std=None,
                  # RPN parameters
                  anchor_generator=None,
@@ -127,7 +127,7 @@ class SSD(GeneralizedSSD300):
                  box_head=None, box_predictor=None,
                  box_score_thresh=0.05, box_nms_thresh=0.5, box_detections_per_img=100,
                  box_fg_iou_thresh=0.5, box_bg_iou_thresh=0.5,
-                 box_batch_size_per_image=512, box_positive_fraction=0.25,
+                 box_batch_size_per_image=600, box_positive_fraction=0.25,
                  bbox_reg_weights=None):
 
         if not hasattr(backbone, "out_channels"):

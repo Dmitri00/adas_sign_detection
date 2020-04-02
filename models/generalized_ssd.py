@@ -177,14 +177,15 @@ class SSDPredictor(nn.Module):
             ret.append((box_regression, clf_logits))
 
         locs, confs = list(zip(*ret))
-        along_plain_height_width_dim = 1
-        locs, confs = torch.cat(locs, along_plain_height_width_dim), torch.cat(confs, along_plain_height_width_dim)
+        along_plain_height_width_box_type_dim = 1
+        locs = torch.cat(locs, along_plain_height_width_box_type_dim)
+        confs = torch.cat(confs, along_plain_height_width_box_type_dim)
 
         # convert batch dimension to list
         locs = [batch_elem for batch_elem in locs]
         confs = [batch_elem for batch_elem in confs]
 
-        # For SSD 300, shall return nbatch x 8732 x {nlabels, nlocs} results
+        # For SSD 300, shall return nbatch x 8732 x {nlabels, nbox_coord} results
         return locs, confs
 
 
@@ -410,7 +411,10 @@ class SSDHead(torch.nn.Module):
                 
 
         #
+    #import pdb; pdb.set_trace()
+
         box_regression, class_logits = self.box_predictor(features)
+        
         
         if self.training:
             proposals, matched_idxs, labels, regression_targets = self.select_training_samples(proposals, targets)
@@ -481,6 +485,7 @@ class GeneralizedSSD300(nn.Module):
             val = img.shape[-2:]
             assert len(val) == 2
             original_image_sizes.append((val[0], val[1]))
+        #import pdb; pdb.set_trace()
         images, targets = self.transform(images, targets)
 
         features = self.feature_extractor(images.tensors)
