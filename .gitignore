@@ -1,0 +1,12 @@
+#Dataset folders
+gt_data/**
+german_traffic_4cl/**
+PennFudanPed/**
+#pytorch checkpoints
+*/*.pth
+
+# python bytecode
+*/__pycache__/**
+*/*.pyc
+#vs code internal data
+.vscode/**
