@@ -34,7 +34,7 @@ class GermanTrafficDataset(object):
             gt_lines = gt_file.readlines()
         self.ground_truth = self.parse_ground_truth(gt_lines)
     def map_box_class(self, box_class):
-        return box_class
+        return box_class + 1
     def parse_ground_truth(self, gt_lines):
         gt_dict = {}
         class_counter = {}
@@ -88,7 +88,6 @@ class GermanTrafficDataset(object):
 
         # Empty field for interface with coco
         target["iscrowd"] = torch.tensor(0)
-
         if self.transforms is not None:
             img, target = self.transforms(img, target)
 
@@ -106,7 +105,7 @@ class GermanTrafficDataset4(GermanTrafficDataset):
     def map_box_class(self, box_class):
         for meta_class_i, (meta_class, values) in enumerate(self.meta_classes.items()):
             if box_class in values:
-                return meta_class_i
+                return meta_class_i + 1
 
 class PennFudanDataset(object):
     def __init__(self, root, transforms, image_set):
