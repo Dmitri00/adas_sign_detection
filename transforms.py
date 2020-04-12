@@ -48,3 +48,17 @@ class ToTensor(object):
     def __call__(self, image, target):
         image = F.to_tensor(image)
         return image, target
+class Resize(object):
+    def __init__(self, size):
+        self.size = size
+    def __call__(self, image, target):
+        
+        image_width, image_height = image.size 
+
+        x_scale = self.size[0] / image_width
+        y_scale = self.size[1] / image_height 
+        scale_tensor = torch.Tensor([x_scale, y_scale, x_scale, y_scale])
+        image = F.resize(image, self.size)
+        target['boxes'] = torch.round(target['boxes'] * scale_tensor)
+        target['area'] = target['area'] * x_scale * y_scale
+        return image, target

@@ -54,19 +54,20 @@ def get_dataset(name, image_set, transform, data_path):
 
 
 def get_transform(train):
-    transforms = []
-    transforms.append(T.ToTensor())
+    transforms = [T.Resize((800, 800)), T.ToTensor()]
+    #transforms.append(T.ToTensor())
     if train:
         transforms.append(T.RandomHorizontalFlip(0.5))
+    #import pdb; pdb.set_trace()
     return T.Compose(transforms)
 
 
 import ssl
 def main(args):
 
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
+    #ctx = ssl.create_default_context()
+    #ctx.check_hostname = False
+    #ctx.verify_mode = ssl.CERT_NONE
     utils.init_distributed_mode(args)
     print(args)
 
