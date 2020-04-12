@@ -1,15 +1,14 @@
 import torch
 import torch.nn as nn
-from generalized_ssd import SSDHead, SSDPredictor, SSDResNet, GeneralizedSSD300, SSDMultilevelFeatureExtractor
-
-from torchvision.ops import misc as misc_nn_ops
-from torchvision.ops import MultiScaleRoIAlign
-
-from torchvision.models.utils import load_state_dict_from_url
-from torchvision.models.detection.transform import GeneralizedRCNNTransform
-
 from torchvision.models.detection.rpn import AnchorGenerator
+from torchvision.models.detection.transform import GeneralizedRCNNTransform
+from torchvision.models.utils import load_state_dict_from_url
+from torchvision.ops import MultiScaleRoIAlign
+from torchvision.ops import misc as misc_nn_ops
 
+from models.generalized_ssd import (GeneralizedSSD300, SSDHead,
+                                    SSDMultilevelFeatureExtractor,
+                                    SSDPredictor, SSDResNet)
 
 
 class SSD(GeneralizedSSD300):
@@ -119,15 +118,15 @@ class SSD(GeneralizedSSD300):
 
     def __init__(self, backbone, num_classes=None,
                  # transform parameters
-                 min_size=350, max_size=450,
+                 min_size=800, max_size=800,
                  image_mean=None, image_std=None,
                  # RPN parameters
                  anchor_generator=None,
                  # Box parameters
                  box_head=None, box_predictor=None,
                  box_score_thresh=0.05, box_nms_thresh=0.5, box_detections_per_img=100,
-                 box_fg_iou_thresh=0.5, box_bg_iou_thresh=0.5,
-                 box_batch_size_per_image=600, box_positive_fraction=0.25,
+                 box_fg_iou_thresh=0.15, box_bg_iou_thresh=0.15,
+                 box_batch_size_per_image=50, box_positive_fraction=0.5,
                  bbox_reg_weights=None):
 
         if not hasattr(backbone, "out_channels"):
@@ -149,7 +148,7 @@ class SSD(GeneralizedSSD300):
 
         if anchor_generator is None:
             # anchor size per every feature map level
-            anchor_sizes = ((32,), (64,), (128,), (256,), (512,), (1024,))
+            anchor_sizes = ((16,), (32,), (64,), (128,), (210,), (320,))
             aspect_ratios = ((0.5, 1.0, 2.0),) * len(anchor_sizes)
             anchor_generator = AnchorGenerator(
                 anchor_sizes, aspect_ratios
@@ -230,6 +229,7 @@ def ssd_custom(pretrained=False, progress=True,
         pretrained (bool): If True, returns a model pre-trained on COCO train2017
         progress (bool): If True, displays a progress bar of the download to stderr
     """
+    num_classes += 1
     backbone = SSDResNet('resnet50', pretrained)
     backbone = SSDMultilevelFeatureExtractor(backbone)
     box_score_thresh = 1/num_classes

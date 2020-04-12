@@ -1,17 +1,17 @@
+import warnings
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torchvision.models.resnet import resnet18, resnet34, resnet50, resnet101, resnet152, model_urls
-from torchvision.models.detection.roi_heads import RoIHeads, fastrcnn_loss
-from torchvision.models.detection.backbone_utils import resnet_fpn_backbone
-from torchvision.models.detection.rpn import AnchorGenerator
-from torch.jit.annotations import Tuple, List, Dict, Optional
+from torch.jit.annotations import Dict, List, Optional, Tuple
 from torchvision.models.detection import _utils as det_utils
-
+from torchvision.models.detection.backbone_utils import resnet_fpn_backbone
+from torchvision.models.detection.roi_heads import RoIHeads, fastrcnn_loss
+from torchvision.models.detection.rpn import AnchorGenerator
+from torchvision.models.resnet import (model_urls, resnet18, resnet34,
+                                       resnet50, resnet101, resnet152)
 from torchvision.ops import boxes as box_ops
 from torchvision.ops import misc as misc_nn_ops
-
-import warnings
 
 
 def ssd_loss(class_logits, box_regression, labels, regression_targets):
@@ -34,6 +34,7 @@ def ssd_loss(class_logits, box_regression, labels, regression_targets):
     labels = torch.cat(labels, dim=0)
     regression_targets = torch.cat(regression_targets, dim=0)
 
+    #import pdb; pdb.set_trace()
     classification_loss = F.cross_entropy(class_logits, labels)
 
     # get indices that correspond to the regression targets for
@@ -237,6 +238,7 @@ class SSDHead(torch.nn.Module):
         # type: (List[Tensor], List[Tensor], List[Tensor])
         matched_idxs = []
         labels = []
+        #import pdb; pdb.set_trace()
         for proposals_in_image, gt_boxes_in_image, gt_labels_in_image in zip(proposals, gt_boxes, gt_labels):
             #  set to self.box_similarity when https://github.com/pytorch/pytorch/issues/27495 lands
             match_quality_matrix = box_ops.box_iou(gt_boxes_in_image, proposals_in_image)
@@ -305,6 +307,7 @@ class SSDHead(torch.nn.Module):
         proposals = self.add_gt_proposals(proposals, gt_boxes)
 
         # get matching gt indices for each proposal
+        #import pdb; pdb.set_trace()
         matched_idxs, labels = self.assign_targets_to_proposals(proposals, gt_boxes, gt_labels)
         # sample a fixed proportion of positive-negative proposals
         sampled_inds = self.subsample(labels)
@@ -489,6 +492,7 @@ class GeneralizedSSD300(nn.Module):
         images, targets = self.transform(images, targets)
 
         features = self.feature_extractor(images.tensors)
+        #import pdb; pdb.set_trace()
         anchors = self.anchor_generator(images, features)
 
         detections, detector_losses = self.ssd_head(features, anchors, images.image_sizes, targets)

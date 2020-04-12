@@ -1,10 +1,12 @@
-import torchvision
 import torch
+import torchvision
 from torchvision.models.detection import *
-from ssd import ssd_custom
-from torchvision.models.detection.rpn import AnchorGenerator
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 from torchvision.models.detection.mask_rcnn import MaskRCNNPredictor
+from torchvision.models.detection.rpn import AnchorGenerator
+
+from models.ssd import ssd_custom
+
 
 def ssd_toch_hub(num_classes, pretrained):
     precision = 'fp32'
