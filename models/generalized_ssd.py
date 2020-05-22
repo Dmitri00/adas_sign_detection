@@ -88,13 +88,15 @@ class SSDResNet(nn.Module):
         x = self.feature_extractor(x)
         return x
 class SSDMultilevelFeatureExtractor(nn.Module):
-    def __init__(self, backbone):
+    def __init__(self, backbone, additional_blocks=False):
         super().__init__()
 
         self.feature_extractor = backbone
         self.out_channels = backbone.out_channels
-        self._build_additional_features(self.feature_extractor.out_channels)
-        self._init_weights()
+        self.additional_blocks = []
+        if additional_blocks:
+            self._build_additional_features(self.feature_extractor.out_channels)
+            self._init_weights()
 
     def _build_additional_features(self, input_size):
         self.additional_blocks = []
@@ -304,24 +306,25 @@ class SSDHead(torch.nn.Module):
         gt_labels = [t["labels"] for t in targets]
 
         # append ground-truth bboxes to propos
-        proposals = self.add_gt_proposals(proposals, gt_boxes)
+        #proposals = self.add_gt_proposals(proposals, gt_boxes)
 
         # get matching gt indices for each proposal
         #import pdb; pdb.set_trace()
-        matched_idxs, labels = self.assign_targets_to_proposals(proposals, gt_boxes, gt_labels)
+        gt_box_idx_per_proposal, gt_label_per_proposal = self.assign_targets_to_proposals(proposals, gt_boxes, gt_labels)
         # sample a fixed proportion of positive-negative proposals
-        sampled_inds = self.subsample(labels)
+        fg_bg_mix_proposal_idx = self.subsample(gt_label_per_proposal)
         matched_gt_boxes = []
         num_images = len(proposals)
         for img_id in range(num_images):
-            img_sampled_inds = sampled_inds[img_id]
-            proposals[img_id] = proposals[img_id][img_sampled_inds]
-            labels[img_id] = labels[img_id][img_sampled_inds]
-            matched_idxs[img_id] = matched_idxs[img_id][img_sampled_inds]
-            matched_gt_boxes.append(gt_boxes[img_id][matched_idxs[img_id]])
+            img_sampled_proposals = fg_bg_mix_proposal_idx[img_id]
+
+            proposals[img_id] = proposals[img_id][img_sampled_proposals]
+            gt_label_per_proposal[img_id] = gt_label_per_proposal[img_id][img_sampled_proposals]
+            gt_box_idx_per_proposal[img_id] = gt_box_idx_per_proposal[img_id][img_sampled_proposals]
+            matched_gt_boxes.append(gt_boxes[img_id][gt_box_idx_per_proposal[img_id]])
 
         regression_targets = self.box_coder.encode(matched_gt_boxes, proposals)
-        return proposals, matched_idxs, labels, regression_targets
+        return proposals, gt_box_idx_per_proposal, gt_label_per_proposal, regression_targets
 
     def postprocess_detections(self, class_logits, box_regression, proposals, image_shapes):
         # type: (Tensor, Tensor, List[Tensor], List[Tuple[int, int]])
@@ -360,8 +363,8 @@ class SSDHead(torch.nn.Module):
             pred_class_labels = torch.argmax(scores, dim=along_class_prediction)
 
             prediction_num = torch.arange(boxes.shape[0], device=device)
-            flat_pred_class_idxs = prediction_num * num_classes + pred_class_labels
-            top1_scores = torch.take(scores, flat_pred_class_idxs)
+            flat_pred_class_prob_idxs = prediction_num * num_classes + pred_class_labels
+            top1_scores = torch.take(scores, flat_pred_class_prob_idxs)
             labels = pred_class_labels
             
 
@@ -411,45 +414,41 @@ class SSDHead(torch.nn.Module):
                 floating_point_types = (torch.float, torch.double, torch.half)
                 assert t["boxes"].dtype in floating_point_types, 'target boxes must of float type'
                 assert t["labels"].dtype == torch.int64, 'target labels must of int64 type'
-                
 
-        #
-    #import pdb; pdb.set_trace()
-
-        box_regression, class_logits = self.box_predictor(features)
+        plain_batch_box_regression, plain_batch_class_logits = self.box_predictor(features)
         
         
         if self.training:
-            proposals, matched_idxs, labels, regression_targets = self.select_training_samples(proposals, targets)
-            class_logits = [img_logits[matched_idx,:] for img_logits, matched_idx in zip(class_logits, matched_idxs)]
-            box_regression = [img_regression[matched_idx, :] for img_regression, matched_idx in zip(box_regression, matched_idxs)]
+            proposals, fg_bg_subsample_idxs, fg_bg_subsample_proposal_labels, fg_bg_subsample_reg_targets = self.select_training_samples(proposals, targets)
+            plain_batch_class_logits = [img_logits[matched_idx,:] for img_logits, matched_idx in zip(plain_batch_class_logits, fg_bg_subsample_idxs)]
+            plain_batch_box_regression = [img_regression[matched_idx, :] for img_regression, matched_idx in zip(plain_batch_box_regression, fg_bg_subsample_idxs)]
         else:
-            labels = None
-            regression_targets = None
-            matched_idxs = None
+            fg_bg_subsample_proposal_labels = None
+            fg_bg_subsample_reg_targets = None
+            fg_bg_subsample_idxs = None
 
         
-        class_logits, box_regression = torch.cat(class_logits), torch.cat(box_regression)
+        plain_batch_class_logits, plain_batch_box_regression = torch.cat(plain_batch_class_logits), torch.cat(plain_batch_box_regression)
         #labels, regression_targets = torch.cat(labels), torch.cat(regression_targets)
 
         result = torch.jit.annotate(List[Dict[str, torch.Tensor]], [])
         losses = {}
         if self.training:
-            assert labels is not None and regression_targets is not None
+            assert fg_bg_subsample_proposal_labels is not None and fg_bg_subsample_reg_targets is not None
             loss_classifier, loss_box_reg = ssd_loss(
-                class_logits, box_regression, labels, regression_targets)
+                plain_batch_class_logits, plain_batch_box_regression, fg_bg_subsample_proposal_labels, fg_bg_subsample_reg_targets)
             losses = {
                 "loss_classifier": loss_classifier,
                 "loss_box_reg": loss_box_reg
             }
         else:
-            boxes, scores, labels = self.postprocess_detections(class_logits, box_regression, proposals, image_shapes)
+            boxes, scores, fg_bg_subsample_proposal_labels = self.postprocess_detections(plain_batch_class_logits, plain_batch_box_regression, proposals, image_shapes)
             num_images = len(boxes)
             for i in range(num_images):
                 result.append(
                     {
                         "boxes": boxes[i],
-                        "labels": labels[i],
+                        "labels": fg_bg_subsample_proposal_labels[i],
                         "scores": scores[i],
                     }
                 )
