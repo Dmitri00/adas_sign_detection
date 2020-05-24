@@ -88,15 +88,13 @@ class SSDResNet(nn.Module):
         x = self.feature_extractor(x)
         return x
 class SSDMultilevelFeatureExtractor(nn.Module):
-    def __init__(self, backbone, additional_blocks=False):
+    def __init__(self, backbone):
         super().__init__()
 
         self.feature_extractor = backbone
         self.out_channels = backbone.out_channels
-        self.additional_blocks = []
-        if additional_blocks:
-            self._build_additional_features(self.feature_extractor.out_channels)
-            self._init_weights()
+        self._build_additional_features(self.feature_extractor.out_channels)
+        self._init_weights()
 
     def _build_additional_features(self, input_size):
         self.additional_blocks = []
@@ -117,7 +115,7 @@ class SSDMultilevelFeatureExtractor(nn.Module):
                     nn.BatchNorm2d(channels),
                     nn.ReLU(inplace=True),
                     nn.Conv2d(channels, output_size, kernel_size=3, bias=False),
-                    nn.BatchNorm2d(output_size),
+                    #nn.BatchNorm2d(output_size),
                     nn.ReLU(inplace=True),
                 )
 
@@ -132,7 +130,6 @@ class SSDMultilevelFeatureExtractor(nn.Module):
 
     def forward(self, x):
         x = self.feature_extractor(x)
-
         detection_feed = [x]
         for l in self.additional_blocks:
             x = l(x)
@@ -205,11 +202,7 @@ class SSDHead(torch.nn.Module):
                  # Faster R-CNN training
                  fg_iou_thresh, bg_iou_thresh,
                  batch_size_per_image, positive_fraction,
-                 bbox_reg_weights,
-                 # Faster R-CNN inference
-                 score_thresh,
-                 nms_thresh,
-                 detections_per_img,
+                 bbox_reg_weights
                  ):
         super(SSDHead, self).__init__()
 
@@ -230,9 +223,9 @@ class SSDHead(torch.nn.Module):
 
         self.box_predictor = box_predictor
 
-        self.score_thresh = score_thresh
-        self.nms_thresh = nms_thresh
-        self.detections_per_img = detections_per_img
+        #self.score_thresh = score_thresh
+        #self.nms_thresh = nms_thresh
+        #self.detections_per_img = detections_per_img
 
     
 
@@ -297,43 +290,33 @@ class SSDHead(torch.nn.Module):
         assert self.DELTEME_all(["labels" in t for t in targets])
         
 
-    def select_training_samples(self, proposals, targets):
-        # type: (List[Tensor], Optional[List[Dict[str, Tensor]]])
-        self.check_targets(targets)
-        assert targets is not None
-        dtype = proposals[0].dtype
-        gt_boxes = [t["boxes"].to(dtype) for t in targets]
-        gt_labels = [t["labels"] for t in targets]
-
-        # append ground-truth bboxes to propos
-        #proposals = self.add_gt_proposals(proposals, gt_boxes)
-
+    def select_training_samples(self, anchors, box_regs_pred, box_labels_pred, gt_boxes, gt_labels):
         # get matching gt indices for each proposal
-        #import pdb; pdb.set_trace()
-        gt_box_idx_per_proposal, gt_label_per_proposal = self.assign_targets_to_proposals(proposals, gt_boxes, gt_labels)
+        gt_box_idx_per_proposal, gt_label_per_proposal = self.assign_targets_to_proposals(anchors, gt_boxes, gt_labels)
         # sample a fixed proportion of positive-negative proposals
         fg_bg_mix_proposal_idx = self.subsample(gt_label_per_proposal)
         matched_gt_boxes = []
-        num_images = len(proposals)
+        num_images = len(anchors)
         for img_id in range(num_images):
-            img_sampled_proposals = fg_bg_mix_proposal_idx[img_id]
+            keep_anchor_idxs = fg_bg_mix_proposal_idx[img_id]
 
-            proposals[img_id] = proposals[img_id][img_sampled_proposals]
-            gt_label_per_proposal[img_id] = gt_label_per_proposal[img_id][img_sampled_proposals]
-            gt_box_idx_per_proposal[img_id] = gt_box_idx_per_proposal[img_id][img_sampled_proposals]
+            anchors[img_id] = anchors[img_id][keep_anchor_idxs]
+            box_regs_pred[img_id] = box_regs_pred[img_id][keep_anchor_idxs]
+            box_labels_pred[img_id] = box_labels_pred[img_id][keep_anchor_idxs]
+            gt_label_per_proposal[img_id] = gt_label_per_proposal[img_id][keep_anchor_idxs]
+            gt_box_idx_per_proposal[img_id] = gt_box_idx_per_proposal[img_id][keep_anchor_idxs]
             matched_gt_boxes.append(gt_boxes[img_id][gt_box_idx_per_proposal[img_id]])
 
-        regression_targets = self.box_coder.encode(matched_gt_boxes, proposals)
-        return proposals, gt_box_idx_per_proposal, gt_label_per_proposal, regression_targets
+        return anchors, box_regs_pred, box_labels_pred, matched_gt_boxes, gt_label_per_proposal
 
-    def postprocess_detections(self, class_logits, box_regression, proposals, image_shapes):
+    def postprocess_detections(self, class_logits, box_regression, anchors, image_shapes):
         # type: (Tensor, Tensor, List[Tensor], List[Tuple[int, int]])
         device = class_logits.device
         num_classes = class_logits.shape[-1]
         #$
 
-        boxes_per_image = [len(boxes_in_image) for boxes_in_image in proposals]
-        pred_boxes = self.box_coder.decode(box_regression, proposals)
+        boxes_per_image = [len(boxes_in_image) for boxes_in_image in anchors]
+        pred_boxes = self.box_coder.decode(box_regression, anchors)
 
         pred_scores = F.softmax(class_logits, -1)
 
@@ -399,15 +382,16 @@ class SSDHead(torch.nn.Module):
 
         return all_boxes, all_scores, all_labels
 
-    def forward(self, features, proposals, image_shapes, targets=None):
+    def forward(self, features, anchors, image_shapes=None, targets=None):
         # type: (Dict[str, Tensor], List[Tensor], List[Tuple[int, int]], Optional[List[Dict[str, Tensor]]])
         """
         Arguments:
             features (List[Tensor])
-            proposals (List[Tensor[N, 4]])
+            anchors (List[Tensor[N, 4]])
             image_shapes (List[Tuple[H, W]])
             targets (List[Dict])
         """
+        global anchor_pred_boxes
         if targets is not None:
             for t in targets:
                 # TODO: https://github.com/pytorch/pytorch/issues/26731
@@ -416,51 +400,117 @@ class SSDHead(torch.nn.Module):
                 assert t["labels"].dtype == torch.int64, 'target labels must of int64 type'
 
         plain_batch_box_regression, plain_batch_class_logits = self.box_predictor(features)
-        
-        
+
         if self.training:
-            proposals, fg_bg_subsample_idxs, fg_bg_subsample_proposal_labels, fg_bg_subsample_reg_targets = self.select_training_samples(proposals, targets)
-            plain_batch_class_logits = [img_logits[matched_idx,:] for img_logits, matched_idx in zip(plain_batch_class_logits, fg_bg_subsample_idxs)]
-            plain_batch_box_regression = [img_regression[matched_idx, :] for img_regression, matched_idx in zip(plain_batch_box_regression, fg_bg_subsample_idxs)]
+            gt_boxes = [t["boxes"] for t in targets]
+            gt_labels = [t["labels"] for t in targets]
+            #gt_box_idx_per_proposal, gt_label_per_proposal = self.assign_targets_to_proposals(anchors, gt_boxes,
+            #                                                                                  gt_labels)
+            # sample a fixed proportion of positive-negative proposals
+            training_samples = self.select_training_samples(
+                anchors,
+                plain_batch_box_regression,
+                plain_batch_class_logits,
+                gt_boxes,
+                gt_labels)
+
+            anchors, anchor_pred_boxes, anchor_pred_scores, anchor_gt_boxes, anchor_gt_labels = training_samples
+            anchor_gt_boxes = self.box_coder.encode(anchor_gt_boxes, anchors)
+
+            return anchor_pred_boxes, anchor_pred_scores, anchor_gt_boxes, anchor_gt_labels
         else:
-            fg_bg_subsample_proposal_labels = None
-            fg_bg_subsample_reg_targets = None
-            fg_bg_subsample_idxs = None
+            return plain_batch_box_regression, plain_batch_class_logits
 
         
-        plain_batch_class_logits, plain_batch_box_regression = torch.cat(plain_batch_class_logits), torch.cat(plain_batch_box_regression)
+        #plain_batch_class_logits, plain_batch_box_regression = torch.cat(plain_batch_class_logits), torch.cat(plain_batch_box_regression)
         #labels, regression_targets = torch.cat(labels), torch.cat(regression_targets)
 
-        result = torch.jit.annotate(List[Dict[str, torch.Tensor]], [])
-        losses = {}
-        if self.training:
-            assert fg_bg_subsample_proposal_labels is not None and fg_bg_subsample_reg_targets is not None
-            loss_classifier, loss_box_reg = ssd_loss(
-                plain_batch_class_logits, plain_batch_box_regression, fg_bg_subsample_proposal_labels, fg_bg_subsample_reg_targets)
-            losses = {
-                "loss_classifier": loss_classifier,
-                "loss_box_reg": loss_box_reg
-            }
-        else:
-            boxes, scores, fg_bg_subsample_proposal_labels = self.postprocess_detections(plain_batch_class_logits, plain_batch_box_regression, proposals, image_shapes)
-            num_images = len(boxes)
-            for i in range(num_images):
-                result.append(
-                    {
-                        "boxes": boxes[i],
-                        "labels": fg_bg_subsample_proposal_labels[i],
-                        "scores": scores[i],
-                    }
-                )
-        return result, losses
+        #result = torch.jit.annotate(List[Dict[str, torch.Tensor]], [])
+        #losses = {}
+        #if self.training:
+        #    assert anchor_pred_boxes is not None and anchor_pred_labels is not None
+            #loss_classifier, loss_box_reg = ssd_loss(
+            #    anchor_pred_boxes, anchor_pred_labels, anchor_gt_boxes, anchor_gt_labels)
+            #losses = {
+            #    "loss_classifier": loss_classifier,
+            #    "loss_box_reg": loss_box_reg
+            #}
+        #else:
+        #    boxes, scores, fg_bg_subsample_proposal_labels = self.postprocess_detections(plain_batch_class_logits, plain_batch_box_regression, anchors, image_shapes)
+        #    num_images = len(boxes)
+        #    for i in range(num_images):
+        #        result.append(
+        #            {
+        #                "boxes": boxes[i],
+        #                "labels": fg_bg_subsample_proposal_labels[i],
+        #                "scores": scores[i],
+        #            }
+        #        )
+        #return result, losses
+
+class DetectionNmsPostprocessor(nn.Module):
+    def __init__(self, score_thresh, nms_thresh, bbox_reg_weights, num_boxes_per_img):
+        super().__init__()
+        self.score_thresh = score_thresh
+        self.nms_thresh = nms_thresh
+        self.num_boxes_per_img = num_boxes_per_img
+        self.box_coder = det_utils.BoxCoder(bbox_reg_weights)
+        pass
+    def filter_predictions(self, boxes, labels, scores):
+
+        inds = torch.nonzero(scores > self.score_thresh).squeeze(1)
+        boxes, scores, labels = boxes[inds], scores[inds], labels[inds]
+
+        # remove empty boxes
+        keep = box_ops.remove_small_boxes(boxes, min_size=1e-2)
+        boxes, scores, labels = boxes[keep], scores[keep], labels[keep]
+
+        # non-maximum suppression, independently done per class
+        keep = box_ops.batched_nms(boxes, scores, labels, self.nms_thresh)
+        # keep only topk scoring predictions
+        keep = keep[:self.num_boxes_per_img]
+        boxes, scores, labels = boxes[keep], scores[keep], labels[keep]
+        return boxes, scores, labels
+
+    def forward(self, box_predictions, label_predictions, anchors):
+        # box coder performs batch decoding
+        # but it merges all box_predictions along batch dimension and adds dummy dimension in-between
+        # this side-effects should be rolled back
+        boxes_prefilter = self.box_coder.decode(torch.cat(box_predictions), anchors)
+        boxes_prefilter = boxes_prefilter.squeeze()
+        batch_sizes = [image_anchors.shape[0] for image_anchors in anchors]
+        boxes_prefilter = torch.split(boxes_prefilter, batch_sizes)
+        labels = []
+        scores = []
+        boxes = []
+        num_images_in_batch = len(box_predictions)
+        for img_id, label_pred in enumerate(label_predictions):
+            label_scores = F.softmax(label_pred, -1)
+
+            top_scores, top_labels = torch.max(label_scores, -1)
+            #top_labels = torch.argmax(label_scores, -1)
+
+            #in order to select top scores, flat adresses should be calculated
+            #base_adress = torch.arange(label_scores.shape[0]) * label_scores.shape[-1]
+            #disp = top_labels
+            #label_top_scores = torch.take(label_scores, base_adress + disp)
+
+            img_boxes = boxes_prefilter[img_id]
+            boxes_filt, scores_filt, labels_filt = self.filter_predictions(img_boxes, top_labels, top_scores)
+            boxes.append(boxes_filt)
+            labels.append(labels_filt)
+            scores.append(scores_filt)
+
+        return boxes, scores, labels
 
 
 class GeneralizedSSD300(nn.Module):
-    def __init__(self, transform, backbone, anchor_generator, ssd_head, num_classes):
+    def __init__(self, transform, backbone, anchor_generator, ssd_head, detection_filter, num_classes):
 
         super().__init__()
         self.transform = transform
         self.feature_extractor = backbone
+        self.detection_filter = detection_filter
 
         self.anchor_sizes = [128, 256, 512]
         self.aspect_ratios = [0.5, 1.0, 2.0]
@@ -487,27 +537,47 @@ class GeneralizedSSD300(nn.Module):
             val = img.shape[-2:]
             assert len(val) == 2
             original_image_sizes.append((val[0], val[1]))
-        #import pdb; pdb.set_trace()
         images, targets = self.transform(images, targets)
 
         features = self.feature_extractor(images.tensors)
-        #import pdb; pdb.set_trace()
+
         anchors = self.anchor_generator(images, features)
 
-        detections, detector_losses = self.ssd_head(features, anchors, images.image_sizes, targets)
-
-        detections = self.transform.postprocess(detections, images.image_sizes, original_image_sizes)
-
+        if self.training:
+            detections, detection_targets = self.ssd_head(features, anchors, images.image_sizes, targets)
+            boxes_pred, scores_pred = detections
+            boxes_gt, scores_gt = detection_targets
+            loss_classifier, loss_box_reg = ssd_loss(scores_pred, boxes_pred, scores_gt, boxes_gt)
+            detector_losses = {
+               "loss_classifier": loss_classifier,
+               "loss_box_reg": loss_box_reg
+            }
+        else:
+            detections = self.ssd_head(features, anchors, images.image_sizes, targets)
+            detector_losses = {}
+        boxes_pred, scores_pred = detections
+        boxes, scores, labels = self.detection_filter(boxes_pred, scores_pred, anchors)
+        result = torch.jit.annotate(List[Dict[str, torch.Tensor]], [])
+        num_images = len(boxes)
+        for i in range(num_images):
+            result.append(
+                {
+                   "boxes": boxes[i],
+                   "labels": labels[i],
+                   "scores": scores[i],
+                }
+            )
         losses = {}
         losses.update(detector_losses)
+        detections = self.transform.postprocess(detections, images.image_sizes, original_image_sizes)
 
         if torch.jit.is_scripting():
             if not self._has_warned:
                 warnings.warn("SSD always returns a (Losses, Detections) tuple in scripting")
                 self._has_warned = True
-            return (losses, detections)
+            return losses, result
         else:
-            return self.eager_outputs(losses, detections)
+            return self.eager_outputs(losses, result)
 
 
 class Loss(nn.Module):

@@ -8,7 +8,8 @@ from torchvision.ops import misc as misc_nn_ops
 
 from models.generalized_ssd import (GeneralizedSSD300, SSDHead,
                                     SSDMultilevelFeatureExtractor,
-                                    SSDPredictor, SSDResNet)
+                                    SSDPredictor, SSDResNet,
+                                    DetectionNmsPostprocessor)
 
 
 class SSD(GeneralizedSSD300):
@@ -167,8 +168,10 @@ class SSD(GeneralizedSSD300):
             ssd_predictor,
             box_fg_iou_thresh, box_bg_iou_thresh,
             box_batch_size_per_image, box_positive_fraction,
-            bbox_reg_weights,
-            box_score_thresh, box_nms_thresh, box_detections_per_img)
+            bbox_reg_weights)
+        bbox_reg_weights = ssd_head.bbox_reg_weight
+        detection_filter = DetectionNmsPostprocessor(
+            box_score_thresh, box_nms_thresh, bbox_reg_weights, box_detections_per_img)
 
         if image_mean is None:
             image_mean = [0.485, 0.456, 0.406]
@@ -176,7 +179,7 @@ class SSD(GeneralizedSSD300):
             image_std = [0.229, 0.224, 0.225]
         transform = GeneralizedRCNNTransform(min_size, max_size, image_mean, image_std)
 
-        super(SSD, self).__init__(transform, backbone, anchor_generator, ssd_head, num_classes)
+        super(SSD, self).__init__(transform, backbone, anchor_generator, ssd_head, detection_filter, num_classes)
 
 
 def ssd_custom(pretrained=False, progress=True,
