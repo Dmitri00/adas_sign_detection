@@ -23,12 +23,10 @@ import time
 
 import torch
 import torch.utils.data
-from torch import nn
-import torchvision
-from dataset import GermanTrafficDataset, GermanTrafficDataset4, PennFudanDataset
+from datasets.GermanTraffic import GermanTrafficDataset, GermanTrafficDataset4
+from datasets.PennFudan import PennFudanDataset
+from datasets.kitti import KittiLoader
 import models.detection_model as model_zoo_local
-import torchvision.models.detection
-import torchvision.models.detection.mask_rcnn
 
 from coco_utils import get_coco, get_coco_kp
 
@@ -45,7 +43,8 @@ def get_dataset(name, image_set, transform, data_path):
         "coco_kp": (data_path, get_coco_kp, 2),
         'german_traffic': (data_path, GermanTrafficDataset, 43),
         'german_traffic_4cl': (data_path, GermanTrafficDataset4, 4),
-        'penn_fudan': (data_path, PennFudanDataset, 2)
+        'penn_fudan': (data_path, PennFudanDataset, 2),
+        'kitti': (data_path, KittiLoader, 4)
     }
     p, ds_fn, num_classes = paths[name]
 
@@ -62,7 +61,6 @@ def get_transform(train):
     return T.Compose(transforms)
 
 
-import ssl
 def main(args):
 
     #ctx = ssl.create_default_context()
