@@ -1,8 +1,8 @@
 import collections
 import os
 import os.path
+from bisect import bisect_right
 
-import cv2
 import numpy as np
 import torch
 from glob import glob
@@ -64,10 +64,16 @@ class AnnotationTransform_kitti(object):
         res = list()
         boxes = []
         labels = []
+        prev_frame_id = -1
+        targets = []
         for line in target_lines:
             line_fields = line.strip().split(' ')
+            frame_id = int(line_fields[0])
             occlusion = int(line_fields[4])
             if occlusion != 0:
+                continue
+            label = line_fields[2]
+            if label not in self.observed_classes:
                 continue
 
             xmin, ymin, xmax, ymax = tuple(line_fields[6:10])
@@ -78,13 +84,20 @@ class AnnotationTransform_kitti(object):
                 cur_pt = float(bnd_box[i])
                 cur_pt = cur_pt / width if i % 2 == 0 else cur_pt / height
                 new_bnd_box.append(cur_pt)
-            label = line_fields[2]
-            if label not in self.observed_classes:
-                continue
             label_idx = self.class_to_ind(label)
-            boxes.append(bnd_box)
-            labels.append(label_idx)
-        return torch.Tensor(boxes), torch.Tensor(labels)
+            if frame_id == prev_frame_id:
+                boxes.append(bnd_box)
+                labels.append(label_idx)
+            else:
+                frame = {"boxes": torch.Tensor(boxes), "labels": torch.Tensor(labels)}
+                targets.append(frame)
+                boxes = [bnd_box]
+                labels = [label_idx]
+            prev_frame_id = frame_id
+        frame = {"boxes": torch.Tensor(boxes), "labels": torch.Tensor(labels)}
+        targets.append(frame)
+
+        return targets
 
 
 class KittiLoader(data.Dataset):
@@ -103,16 +116,31 @@ class KittiLoader(data.Dataset):
         self.name = 'kitti'
 
         image_root = os.path.join(root, "training", "image_2")
-        sequences = os.listdir(image_root)
+        #sequences = os.listdir(image_root)
+        sequences = glob(os.path.join(root, "training", 'label_2', '*.txt'))
+        sequences = sorted(sequences)
         if self.image_set == 'train':
             sequences = sequences[:NUM_TRAIN_SEQUENCES]
         else:
             sequences = sequences[NUM_TRAIN_SEQUENCES:]
         self.files = []
+        self.sequence_lengths = []
         self.labels = []
+        cumulative_length = 0
         for sequence in sequences:
-            self.files.extend(glob(os.path.join(image_root, sequence, '*.png')))
-            self.labels.extend(glob(os.path.join(root, "training", 'label_2', '*.txt')))
+            sequence_name = os.path.basename(sequence)
+
+            files_in_seq = glob(os.path.join(image_root, sequence_name, '*.png'))
+            self.files.extend(sorted(files_in_seq))
+            self.sequence_lengths.append(cumulative_length)
+            with open(sequence, 'r') as label_file:
+                label_lines = label_file.readlines()
+                sequence_targets = self.target_transform(label_lines, 1, 1)
+            self.labels.extend(sequence_targets)
+            cumulative_length += len(files_in_seq)
+
+    def get_sequence_of_frame(self, index):
+        return bisect_right(self.sequence_lengths, index) - 1
 
     def __len__(self):
         return len(self.files)
@@ -126,10 +154,9 @@ class KittiLoader(data.Dataset):
         height, width, channels = img.shape
         # img = np.array(img, dtype=np.uint8)
 
-        lbl_path = self.labels[index]
-        lbl_lines = open(lbl_path, 'r').readlines()
-        boxes, labels = self.target_transform(lbl_lines, width, height)
-
+        target = self.labels[index]
+        boxes = target["boxes"]
+        labels = target["labels"]
         # if self.is_transform:
         #     img, lbl = self.transform(img, lbl)
 
