@@ -4,6 +4,7 @@ import os.path
 from bisect import bisect_right
 
 import numpy as np
+import pandas as pd
 import torch
 from glob import glob
 from torch.utils import data
@@ -44,7 +45,6 @@ class Class_to_ind(object):
 #     js = open('config.json').read()
 #     data = json.loads(js)
 #     return data[name]['data_path']
-
 class AnnotationTransform_kitti(object):
     '''
     Transform Kitti detection labeling type to norm type:
@@ -61,44 +61,75 @@ class AnnotationTransform_kitti(object):
 
     def __call__(self, target_lines, width, height):
 
-        res = list()
         boxes = []
         labels = []
-        prev_frame_id = -1
-        targets = []
+        prev_frame_id = 0
+        targets =
+
         for line in target_lines:
             line_fields = line.strip().split(' ')
+
             frame_id = int(line_fields[0])
+
+            if frame_id != prev_frame_id:
+                frame = {"boxes": torch.Tensor(boxes), "labels": torch.Tensor(labels),
+                         "frame_id": prev_frame_id}
+                targets.append(frame)
+                boxes = []
+                labels = []
+            prev_frame_id = frame_id
+
             occlusion = int(line_fields[4])
+
+            label = line_fields[2]
+            label_idx = self.class_to_ind(label)
+
+            xmin, ymin, xmax, ymax = tuple(line_fields[6:10])
+            bnd_box = [xmin, ymin, xmax, ymax]
+
             if occlusion != 0:
                 continue
-            label = line_fields[2]
             if label not in self.observed_classes:
                 continue
 
-            xmin, ymin, xmax, ymax = tuple(line_fields[6:10])
+            labels.append(label_idx)
+            boxes.append(bnd_box)
 
-            bnd_box = [xmin, ymin, xmax, ymax]
-            new_bnd_box = bnd_box
-            for i, pt in enumerate(range(4)):
-                cur_pt = float(bnd_box[i])
-                cur_pt = cur_pt / width if i % 2 == 0 else cur_pt / height
-                new_bnd_box.append(cur_pt)
-            label_idx = self.class_to_ind(label)
-            if frame_id == prev_frame_id:
-                boxes.append(bnd_box)
-                labels.append(label_idx)
-            else:
-                frame = {"boxes": torch.Tensor(boxes), "labels": torch.Tensor(labels)}
-                targets.append(frame)
-                boxes = [bnd_box]
-                labels = [label_idx]
-            prev_frame_id = frame_id
-        frame = {"boxes": torch.Tensor(boxes), "labels": torch.Tensor(labels)}
+        frame = {"boxes": torch.Tensor(boxes),
+                 "labels": torch.Tensor(labels),
+                 "frame_id": frame_id}
         targets.append(frame)
 
         return targets
+class AnnotationImporter(AnnotationTransform_kitti):
+    def __call__(self, annotation_file, img_files_list):
+        files_df = pd.Series(img_files_list, name="file")
+        names = 'frame track_id type truncated occluded alpha \
+        x0 y0 x1 y1 height width length loc_x loc_y loc_z phi'.split(' ')
+        annot_df = pd.read_csv(annotation_file,
+                               header=None, sep=' ',
+                               names=names)
 
+        keep = annot_df["occluded"] == 1
+        annot_df = annot_df[keep]
+
+        keep = annot_df["type"].isin(self.observed_classes)
+        annot_df = annot_df[keep]
+
+        type_categories = pd.Categorical(annot_df["type"], categories=KITTI_CLASSES)
+        annot_df["type"] = type_categories.cat.codes
+        annot_df["box"] = list(zip(annot_df["x0"],annot_df["y0"],annot_df["x1"],annot_df["y1"]))
+
+        full_annotation = annot_df.join(files_df, how="left")
+
+        grouped_df = full_annotation.groupby(["frame"])
+
+        boxes = grouped_df["box"].apply(list).to_list()
+        labels = grouped_df["type"].apply(list).to_list()
+        files = grouped_df["file"].apply(list).to_list()
+        target_df = pd.concat((boxes, labels, files), axis=1)
+        #train_records = grouped_df[["box", "type", "file"]].apply(lambda x: list(pd.DataFrame.to_records(x)))
+        return target_df
 
 class KittiLoader(data.Dataset):
     def __init__(self, root, image_set="train",
@@ -107,7 +138,7 @@ class KittiLoader(data.Dataset):
         self.image_set = image_set
         self.n_classes = min(num_classes, len(KITTI_CLASSES_PRIORITY))
         self.observed_classes = set(KITTI_CLASSES_PRIORITY[:self.n_classes])
-        self.target_transform = AnnotationTransform_kitti(self.observed_classes)
+        self.target_transform = AnnotationImporter(self.observed_classes)
         #self.img_size = img_size if isinstance(img_size, tuple) else (img_size, img_size)
         self.mean = np.array([104.00699, 116.66877, 122.67892])
         self.files = collections.defaultdict(list)
@@ -115,9 +146,9 @@ class KittiLoader(data.Dataset):
         self.transforms = transforms
         self.name = 'kitti'
 
-        image_root = os.path.join(root, "training", "image_2")
+        image_root = os.path.join(root, "training", "image_02")
         #sequences = os.listdir(image_root)
-        sequences = glob(os.path.join(root, "training", 'label_2', '*.txt'))
+        sequences = glob(os.path.join(root, "training", 'label_02', '*.txt'))
         sequences = sorted(sequences)
         if self.image_set == 'train':
             sequences = sequences[:NUM_TRAIN_SEQUENCES]
@@ -131,34 +162,30 @@ class KittiLoader(data.Dataset):
             sequence_name = os.path.basename(sequence)
 
             files_in_seq = glob(os.path.join(image_root, sequence_name, '*.png'))
-            self.files.extend(sorted(files_in_seq))
             self.sequence_lengths.append(cumulative_length)
             with open(sequence, 'r') as label_file:
-                label_lines = label_file.readlines()
-                sequence_targets = self.target_transform(label_lines, 1, 1)
-            self.labels.extend(sequence_targets)
+                sequence_targets = self.target_transform(label_file, files_in_seq)
+
+            #self.files.extend(sorted(files_in_seq))
+            self.labels = pd.concat((self.labels, sequence_targets))
             cumulative_length += len(files_in_seq)
 
     def get_sequence_of_frame(self, index):
         return bisect_right(self.sequence_lengths, index) - 1
 
     def __len__(self):
-        return len(self.files)
+        return len(self.labels)
 
     def __getitem__(self, index):
-        img_name = self.files[index]
-        img_path = img_name
+        targets_df = self.labels.iloc[index]
+        boxes = torch.Tensor(targets_df["box"])
+        labels = torch.LongTensor(targets_df["type"])
+        img_path = targets_df["file"]
+        try:
+            img = Image.open(img_path).convert("RGB")
+        except OSError:
+            return self.__getitem__(index+1)
 
-        # img = m.imread(img_path)
-        img = Image.open(img_path).convert("RGB")
-        height, width, channels = img.shape
-        # img = np.array(img, dtype=np.uint8)
-
-        target = self.labels[index]
-        boxes = target["boxes"]
-        labels = target["labels"]
-        # if self.is_transform:
-        #     img, lbl = self.transform(img, lbl)
 
         target = {}
         area = (boxes[:, 3] - boxes[:, 1]) * (boxes[:, 2] - boxes[:, 0])
