@@ -104,8 +104,9 @@ class AnnotationTransform_kitti(object):
 class AnnotationImporter(AnnotationTransform_kitti):
     def __call__(self, annotation_file, img_files_list):
         files_df = pd.Series(img_files_list, name="file")
-        names = 'frame track_id type truncated occluded alpha \
-        x0 y0 x1 y1 height width length loc_x loc_y loc_z phi'.split(' ')
+        files_df.dropna()
+        names = 'frame track_id type truncated occluded alpha x0 y0 x1 y1 height width length loc_x loc_y loc_z phi'.split(
+            ' ')
         annot_df = pd.read_csv(annotation_file,
                                header=None, sep=' ',
                                names=names)
@@ -116,19 +117,34 @@ class AnnotationImporter(AnnotationTransform_kitti):
         keep = annot_df["type"].isin(self.observed_classes)
         annot_df = annot_df[keep]
 
+        for col in ("x0", "y0", "x1", "y1"):
+            keep = 1 < annot_df[col]
+            annot_df = annot_df[keep]
+            # annot_df[col] = annot_df[annot_df[col] < 5]*5
+            keep = annot_df[col] < 1400
+            annot_df = annot_df[keep]
+
+        annot_df["width"] = (annot_df["x1"] - annot_df["x0"])
+        keep = annot_df["width"] > 10
+        annot_df = annot_df[keep]
+        annot_df["height"] = (annot_df["y1"] - annot_df["y0"])
+        keep = annot_df["height"] > 10
+        annot_df = annot_df[keep]
         type_categories = pd.Categorical(annot_df["type"], categories=KITTI_CLASSES)
-        annot_df["type"] = type_categories.cat.codes
-        annot_df["box"] = list(zip(annot_df["x0"],annot_df["y0"],annot_df["x1"],annot_df["y1"]))
+        annot_df["type"] = type_categories.codes
+        annot_df["box"] = list(map(np.array, zip(annot_df["x0"], annot_df["y0"], annot_df["x1"], annot_df["y1"])))
 
-        full_annotation = annot_df.join(files_df, how="left")
+        # full_annotation = annot_df.join(files_df, how="left")
 
-        grouped_df = full_annotation.groupby(["frame"])
+        grouped_df = annot_df.groupby(["frame"])
 
-        boxes = grouped_df["box"].apply(list).to_list()
-        labels = grouped_df["type"].apply(list).to_list()
-        files = grouped_df["file"].apply(list).to_list()
-        target_df = pd.concat((boxes, labels, files), axis=1)
-        #train_records = grouped_df[["box", "type", "file"]].apply(lambda x: list(pd.DataFrame.to_records(x)))
+        boxes = grouped_df["box"].apply(np.array)
+        labels = grouped_df["type"].apply(np.array)
+        # files = grouped_df["file"].apply(n)
+        # import pdb; pdb.set_trace()
+        target_df = pd.concat((boxes, labels), axis=1)
+        target_df = target_df.join(files_df, on="frame", how="inner")
+        # train_records = grouped_df[["box", "type", "file"]].apply(lambda x: list(pd.DataFrame.to_records(x)))
         return target_df
 
 class KittiLoader(data.Dataset):
