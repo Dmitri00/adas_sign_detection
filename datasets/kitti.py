@@ -64,7 +64,6 @@ class AnnotationTransform_kitti(object):
         boxes = []
         labels = []
         prev_frame_id = 0
-        targets =
 
         for line in target_lines:
             line_fields = line.strip().split(' ')
@@ -172,18 +171,22 @@ class KittiLoader(data.Dataset):
             sequences = sequences[NUM_TRAIN_SEQUENCES:]
         self.files = []
         self.sequence_lengths = []
-        self.labels = []
+        self.labels = None
         cumulative_length = 0
         for sequence in sequences:
             sequence_name = os.path.basename(sequence)
 
             files_in_seq = glob(os.path.join(image_root, sequence_name, '*.png'))
+            files_in_seq = sorted(files_in_seq)
             self.sequence_lengths.append(cumulative_length)
             with open(sequence, 'r') as label_file:
                 sequence_targets = self.target_transform(label_file, files_in_seq)
 
             #self.files.extend(sorted(files_in_seq))
-            self.labels = pd.concat((self.labels, sequence_targets))
+            if self.labels is not None:
+                self.labels = pd.concat((self.labels, sequence_targets))
+            else:
+                self.labels = sequence_targets
             cumulative_length += len(files_in_seq)
 
     def get_sequence_of_frame(self, index):
